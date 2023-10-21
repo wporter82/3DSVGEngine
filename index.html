@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<head>
+    <script type="text/javascript" src="Library.js"></script>
+    <script>
+        var meshCube = new Mesh();
+        // South
+        meshCube.tris.push(new Triangle(new Vec3(0,0,0),new Vec3(0,1,0),new Vec3(1,1,0)));
+        meshCube.tris.push(new Triangle(new Vec3(0,0,0),new Vec3(1,1,0),new Vec3(1,0,0)));
+        // East
+        meshCube.tris.push(new Triangle(new Vec3(1,0,0),new Vec3(1,1,0),new Vec3(1,1,1)));
+        meshCube.tris.push(new Triangle(new Vec3(1,0,0),new Vec3(1,1,1),new Vec3(1,0,1)));
+        // North
+        meshCube.tris.push(new Triangle(new Vec3(1,0,1),new Vec3(1,1,1),new Vec3(0,1,1)));
+        meshCube.tris.push(new Triangle(new Vec3(1,0,1),new Vec3(0,1,1),new Vec3(0,0,1)));
+        // West
+        meshCube.tris.push(new Triangle(new Vec3(0,0,1),new Vec3(0,1,1),new Vec3(0,1,0)));
+        meshCube.tris.push(new Triangle(new Vec3(0,0,1),new Vec3(0,1,0),new Vec3(0,0,0)));
+        // Top
+        meshCube.tris.push(new Triangle(new Vec3(0,1,0),new Vec3(0,1,1),new Vec3(1,1,1)));
+        meshCube.tris.push(new Triangle(new Vec3(0,1,0),new Vec3(1,1,1),new Vec3(1,1,0)));
+        // Bottom
+        meshCube.tris.push(new Triangle(new Vec3(1,0,1),new Vec3(0,0,1),new Vec3(0,0,0)));
+        meshCube.tris.push(new Triangle(new Vec3(1,0,1),new Vec3(0,0,0),new Vec3(1,0,0)));
+
+        // Projection Matrix
+        var matProj;
+
+        var gSvgElm;
+        var gFrame = 0;
+        var fTheta = 0;
+        var sHeight = 0;
+        var sWidth = 0;
+        var drawWireframe = false;
+
+        var Input = {
+            Up: false,
+            Down: false,
+            Left: false,
+            Right: false,
+            W: false,
+            A: false,
+            S: false,
+            D: false
+        };
+
+        var vCamera = new Vec3(-1,3,0);
+        var vLookDir = new Vec3(0,0,1);
+        var fYaw = 0;
+
+        function init(evt) {
+            gSvgElm = evt.target;
+            sHeight = gSvgElm.viewBox.baseVal.height;
+            sWidth = gSvgElm.viewBox.baseVal.width;
+            matProj = GetProjectionMatrix(60, sHeight / sWidth, 0.1, 1000);
+            setInterval(render, 1000/60);
+        }
+
+        function render() {
+            gFrame++;
+            fElapsedTime = 0.016;
+
+            if (Input.Up) {
+                vCamera.y += 18 * fElapsedTime;
+            }
+            if (Input.Down) {
+                vCamera.y -= 18 * fElapsedTime;
+            }
+            if (Input.Left) {
+                vCamera.x += 18 * fElapsedTime;
+            }
+            if (Input.Right) {
+                vCamera.x -= 18 * fElapsedTime;
+            }
+
+            var vForward = vLookDir.multiply(18 * fElapsedTime);
+            if (Input.W) {
+                vCamera = vCamera.add(vForward);
+            }
+            if (Input.S) {
+                vCamera = vCamera.subtract(vForward);
+            }
+
+            if (Input.A) {
+                fYaw -= 4 * fElapsedTime;
+            }
+            if (Input.D) {
+                fYaw += 4 * fElapsedTime;
+            }
+            
+            // clear screen
+            while (gSvgElm.firstChild) {
+                gSvgElm.removeChild(gSvgElm.lastChild);
+            }
+
+            drawMesh(meshCube);
+        }
+
+        function drawMesh(mesh) {
+            var arrTrianglesToRaster = [];
+
+            // Move away from the camera
+            var matTrans = GetTranslationMatrix(0,0,6);
+            
+            var matWorld = GetIdentityMatrix();
+            matWorld = MultiplyMatrices(matWorld.m, matTrans.m);
+
+            var vUp = new Vec3(0,-1,0);
+            var vTarget = new Vec3(0,0,1);
+            var matCameraRot = GetRotationYMatrix(fYaw);
+            vLookDir = MultiplyVecMatrix(vTarget, matCameraRot.m);
+            vTarget = vCamera.add(vLookDir);
+
+            var matCamera = MatrixPointAt(vCamera, vTarget, vUp);
+            var matView = MatrixQuickInverse(matCamera);
+
+            for (var tri of mesh.tris)
+            {
+                var triTransformed = new Triangle();
+                var triViewed = new Triangle();
+
+                // Apply matrix transformation to each point
+                for (var i = 0; i < 3; i++) {
+                    triTransformed.p[i] = MultiplyVecMatrix(tri.p[i], matWorld.m);
+                }
+
+                // Calc normal
+                var line1 = triTransformed.p[1].subtract(triTransformed.p[0]);
+                var line2 = triTransformed.p[2].subtract(triTransformed.p[0]);
+                var normal = line1.cross(line2);
+                normal.normalize();
+
+                // Get a ray from the triangle to the camera
+                var vCameraRay = triTransformed.p[0].subtract(vCamera);
+
+                // Only render if face is toward camera
+                if (normal.dot(vCameraRay) < 0)
+                {
+                    // Lighting
+                    var lightDirection = new Vec3(1,0.75,-0.5);
+                    lightDirection.normalize();
+
+                    var dp = (normal.dot(lightDirection) * (200 - 50)) + 50;
+                    var r = dp * 1;
+                    var g = dp * 0.75;
+                    var b = dp * 1;
+
+                    var lightDirection2 = new Vec3(-1,0,0);
+                    dp = (normal.dot(lightDirection2) * (200 - 50)) + 50;
+                    r += dp * 0;
+                    g += dp * 0.25;
+                    b += dp * 0.75;
+
+                    triTransformed.col = `rgb(${r},${g},${b})`;
+
+                    // Convert world space to view space
+                    for (var i = 0; i < 3; i++) {
+                        triViewed.p[i] = MultiplyVecMatrix(triTransformed.p[i], matView.m);
+                    }
+                    triViewed.col = triTransformed.col;
+
+                    // Clip triangles behind camera, split them into smaller chunks as needed
+                    var clippedTris = TriangleClipAgainstPlane(new Vec3(0,0,0.1), new Vec3(0,0,1.0), triViewed);
+
+                    for (var i = 0; i < clippedTris.length; i++) {
+                        // Project triangles from 3D to 2D
+                        var vOffset = new Vec3(1,1,0);
+                        var triProjected = new Triangle();
+                        triProjected.col = clippedTris[i].col;
+                        for (var j = 0; j < 3; j++) {
+                            triProjected.p[j] = MultiplyVecMatrix(clippedTris[i].p[j], matProj.m);
+                            // normalize the projected using the w value
+                            triProjected.p[j] = triProjected.p[j].divide(triProjected.p[j].w);
+                            // Scale into view
+                            triProjected.p[j] = triProjected.p[j].add(vOffset);
+                            triProjected.p[j].x *= 0.5 * sWidth;
+                            triProjected.p[j].y *= 0.5 * sHeight;
+                        }
+    
+                        arrTrianglesToRaster.push(triProjected);
+                    }
+
+                }
+            }
+
+            // Sort before rendering
+            arrTrianglesToRaster.sort((t1,t2) => {
+                var z1 = (t1.p[0].z + t1.p[1].z + t1.p[2].z) / 3;
+                var z2 = (t2.p[0].z + t2.p[1].z + t2.p[2].z) / 3;
+                
+                if (z1 < z2)
+                    return 1;
+                if (z1 > z2)
+                    return -1;
+
+                return 0;
+            });
+
+            // Clip triangles that are outside of the screen view
+            for (var triToRaster of arrTrianglesToRaster) {
+                var trisQueue = [];
+
+                trisQueue.push(triToRaster);
+                var newTris = 1;
+
+                for (var p = 0; p < 4; p++) {
+                    while (newTris > 0) {
+                        var testTri = trisQueue.shift();
+                        newTris--;
+
+                        var clipped = [];
+                        switch (p) {
+                            case 0:
+                                clipped = TriangleClipAgainstPlane(new Vec3(0,0,0), new Vec3(0,1,0), testTri);
+                                break;
+                            case 1:
+                                clipped = TriangleClipAgainstPlane(new Vec3(0,sHeight - 1,0), new Vec3(0,-1,0), testTri);
+                                break;
+                            case 2:
+                                clipped = TriangleClipAgainstPlane(new Vec3(0,0,0), new Vec3(1,0,0), testTri);
+                                break;
+                            case 3:
+                                clipped = TriangleClipAgainstPlane(new Vec3(sWidth - 1,0,0), new Vec3(-1,0,0), testTri);
+                                break;
+                        
+                            default:
+                                break;
+                        }
+
+                        for (var i = 0; i < clipped.length; i++) {
+                            trisQueue.push(clipped[i]);
+                        }
+                    }
+                    newTris = trisQueue.length;
+                }
+
+                for (var t of trisQueue) {
+                    drawTiangle(t.p[0], t.p[1], t.p[2], t.col);
+                }
+            }
+        }
+
+        function drawTiangle(a,b,c, color) {
+            if (drawWireframe) {
+                drawLine(a.x, a.y, b.x, b.y, color);
+                drawLine(b.x, b.y, c.x, c.y, color);
+                drawLine(c.x, c.y, a.x, a.y, color);
+            } else {
+                var poly = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+                poly.setAttribute("points", `${a.x},${a.y} ${b.x},${b.y} ${c.x},${c.y}`);
+                poly.style.fill = color;
+                gSvgElm.appendChild(poly);
+            }
+        }
+
+        function drawLine(x1,y1,x2,y2,color) {
+            var line = document.createElementNS("http://www.w3.org/2000/svg","line");
+            line.setAttribute("x1", x1);
+            line.setAttribute("y1", y1);
+            line.setAttribute("x2", x2);
+            line.setAttribute("y2", y2);
+            line.setAttribute("stroke", color);
+            gSvgElm.appendChild(line);
+        }
+    </script>
+    <style>
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            color: white;
+            background-color: black;
+            padding: 0px;
+            margin: 0px;
+        }
+    </style>
+</head>
+<body>
+    <svg viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg" onload="init(evt)" style="background-color: black; height:850px; border:1px solid grey" shape-rendering="crispEdges">
+    </svg>
+    <br>
+    <p><input type="file" name="loadObj" id="loadObj"/></p>
+    <p><input type="checkbox" id="wireframe"/> Draw Wireframe</p>
+    <script>
+        var file = document.getElementById("loadObj");
+        var wireframe = document.getElementById("wireframe");
+
+        wireframe.addEventListener("change", function() {
+            drawWireframe = this.checked;
+        });
+
+        file.addEventListener("change", function () {
+            var reader = new FileReader();
+            reader.onload = function (progressEvent) {
+                meshCube = new Mesh();
+                var verts = [];
+
+                var lines = this.result.split("\n");
+                for (var line of lines) {
+                    var lineSplit = line.split(' ');
+                    switch (lineSplit[0]) {
+                        case 'v':
+                        {
+                            verts.push(new Vec3(lineSplit[1],lineSplit[2],lineSplit[3]));
+                            break;
+                        }
+
+                        case 'f':
+                        {
+                            var p1 = lineSplit[1].split('//')[0] - 1;
+                            var p2 = lineSplit[2].split('//')[0] - 1;
+                            var p3 = lineSplit[3].split('//')[0] - 1;
+                            meshCube.tris.push(new Triangle(verts[p1],verts[p2],verts[p3]));
+                            break;
+                        }
+                    
+                        default:
+                        {
+
+                            break;
+                        }
+                    }
+                }
+            };
+            reader.readAsText(this.files[0]);
+        });
+
+        document.addEventListener("keydown", function (evt) {
+            switch (evt.code) {
+                case 'ArrowUp':
+                    Input.Up = true;
+                    break;
+                case 'ArrowLeft':
+                    Input.Left = true;
+                    break;
+                case 'ArrowDown':
+                    Input.Down = true;
+                    break;
+                case 'ArrowRight':
+                    Input.Right = true;
+                    break;
+
+                case 'KeyW':
+                    Input.W = true;
+                    break;
+                case 'KeyA':
+                    Input.A = true;
+                    break;
+                case 'KeyS':
+                    Input.S = true;
+                    break;
+                case 'KeyD':
+                    Input.D = true;
+                    break;
+            
+                default:
+                    break;
+            }
+        });
+        document.addEventListener("keyup", function (evt) {
+            switch (evt.code) {
+                case 'ArrowUp':
+                    Input.Up = false;
+                    break;
+                case 'ArrowLeft':
+                    Input.Left = false;
+                    break;
+                case 'ArrowDown':
+                    Input.Down = false;
+                    break;
+                case 'ArrowRight':
+                    Input.Right = false;
+                    break;
+
+                case 'KeyW':
+                    Input.W = false;
+                    break;
+                case 'KeyA':
+                    Input.A = false;
+                    break;
+                case 'KeyS':
+                    Input.S = false;
+                    break;
+                case 'KeyD':
+                    Input.D = false;
+                    break;
+            
+                default:
+                    break;
+            }
+        });
+    </script>
+</body>
+</html>
